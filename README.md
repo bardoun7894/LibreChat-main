@@ -1,183 +1,185 @@
-<div align="center">
+# Ornina AI Platform
 
-# LibreChat
+A comprehensive AI SaaS platform for image and video generation with bilingual support (English/Arabic).
 
-[![GitHub release](https://img.shields.io/github/release/danny-avila/LibreChat.svg)](https://github.com/danny-avila/LibreChat/releases)
-[![License](https://img.shields.io/badge/license-ISC-blue.svg)](https://github.com/danny-avila/LibreChat/blob/main/LICENSE)
-[![Discord](https://img.shields.io/discord/1072943531478362144.svg)](https://discord.gg/CEZJnJt8f3)
-[![Docker Pulls](https://img.shields.io/docker/pulls/dannyavila/librechat.svg)](https://hub.docker.com/r/dannyavila/librechat/)
-[![GitHub Repo stars](https://img.shields.io/github/stars/danny-avila/LibreChat?style=social)](https://github.com/danny-avila/LibreChat)
+## Features
 
-**Enhanced ChatGPT Clone**: Features OpenAI, Assistants API, Anthropic, Mistral, Google Palm & Gemini, and more. Supports custom conversation characters, speech synthesis, plugins, multi-user system, and much more!
+- **Multi-Provider AI Generation**: Support for multiple AI providers including DALL-E 3, Midjourney, Stable Diffusion, Veo3, and Sora2
+- **Bilingual Interface**: Full support for English and Arabic with RTL layout for Arabic
+- **Microservices Architecture**: Scalable and maintainable service-oriented architecture
+- **Custom Branding**: Professional appearance with Ornina branding
+- **Docker Support**: Easy deployment with Docker and Docker Compose
 
-[**Live Demo**](https://librechat.ai/) | [**Features**](#-features) | [**Quick Start**](#-quick-start) | [**Configuring AI Endpoints**](#-configuring-ai-endpoints) | [**FAQ**](#-faq) | [**Contributing**](#-contributing)
+## Quick Start
 
-</div>
+### Prerequisites
 
-## ✨ Features
+- Docker and Docker Compose
+- Node.js (for local development)
+- API keys for AI providers (see Environment Variables)
 
-- 🤖 **Multiple AI Model Support**: OpenAI, Azure OpenAI, Anthropic, Google (PaLM & Gemini), Mistral, Groq, Perplexity, Together AI, OpenRouter, and more
-- 🎭 **Custom Characters/Personas**: Create and customize AI personalities for different use cases
-- 🎤 **Speech-to-Text & Text-to-Speech**: Voice input and output capabilities
-- 🔌 **Plugin System**: Extensible architecture for custom functionality
-- 👥 **Multi-User Support**: User management and authentication system
-- 📁 **File Upload & Management**: Share documents, images, and other files
-- 🔍 **Search & Filtering**: Find conversations and messages easily
-- 🎨 **Customizable UI**: Dark/light themes, adjustable fonts, and more
-- 🌐 **Internationalization**: Multi-language support
-- 📱 **Mobile Responsive**: Works seamlessly on all devices
-- 🔐 **Security**: JWT authentication, role-based access control
-- 📊 **Analytics**: Usage tracking and insights
-- 🔄 **Conversation Management**: Save, edit, and organize conversations
-
-## 🚀 Quick Start
-
-### Option 1: Docker (Recommended)
+### Installation
 
 1. **Clone the repository**:
-
    ```bash
-   git clone https://github.com/danny-avila/LibreChat.git
-   cd LibreChat
+   git clone https://github.com/bardoun7894/chatOrnina.git
+   cd chatOrnina
    ```
 
 2. **Set up environment variables**:
-
    ```bash
    cp .env.example .env
-   # Edit .env with your configuration
+   # Edit .env with your API keys
    ```
 
-3. **Run with Docker Compose**:
-
+3. **Run with Docker**:
    ```bash
-   docker-compose up -d
+   chmod +x scripts/docker-run.sh
+   ./scripts/docker-run.sh setup
    ```
 
 4. **Access the application**:
-   Open http://localhost:3080 in your browser
+   - Client Application: http://localhost:3012
+   - API Gateway: http://localhost:3080
 
-### Option 2: Manual Installation
+## Environment Variables
+
+Create a `.env` file with the following variables:
+
+```bash
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-here
+
+# MongoDB Configuration
+MONGO_ROOT_USERNAME=admin
+MONGO_ROOT_PASSWORD=your-mongodb-password-here
+
+# Chat AI Providers
+OPENAI_API_KEY=your-openai-api-key-here
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
+GOOGLE_API_KEY=your-google-api-key-here
+
+# KIE AI API Configuration (Primary Provider)
+KIE_API_KEY=your-kie-api-key-here
+KIE_API_URL=https://api.kie.ai
+
+# Direct API Configuration (Fallback Providers)
+OPENAI_API_URL=https://api.openai.com/v1
+MIDJOURNEY_API_KEY=your-midjourney-api-key-here
+MIDJOURNEY_API_URL=https://api.midjourney.com/v1
+STABLE_DIFFUSION_API_KEY=your-stable-diffusion-api-key-here
+STABLE_DIFFUSION_API_URL=https://api.stability.ai/v1
+BANANA_API_KEY=your-banana-api-key-here
+BANANA_API_URL=https://api.banana.dev/v1
+VEO3_API_KEY=your-veo3-api-key-here
+VEO3_API_URL=https://api.veo3.ai
+SORA2_API_KEY=your-sora2-api-key-here
+SORA2_API_URL=https://api.sora2.ai
+```
+
+## Architecture
+
+The application consists of the following microservices:
+
+- **API Gateway**: Central routing and authentication service
+- **Image Generation Service**: Handles image generation with multiple providers
+- **Video Generation Service**: Handles video generation with multiple providers
+- **Client Application**: React-based frontend with bilingual support
+- **MongoDB**: Data storage
+- **Redis**: Caching and session management
+- **Nginx**: Reverse proxy and load balancer
+
+## Docker Commands
+
+```bash
+# Start the application
+./scripts/docker-run.sh start
+
+# Stop the application
+./scripts/docker-run.sh stop
+
+# Restart the application
+./scripts/docker-run.sh restart
+
+# View logs
+./scripts/docker-run.sh logs
+
+# View logs for a specific service
+./scripts/docker-run.sh logs api-gateway
+
+# Clean up all containers, networks, and volumes
+./scripts/docker-run.sh clean
+```
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+### Installation
 
 1. **Install dependencies**:
-
    ```bash
    npm install
    ```
 
-2. **Set up environment variables**:
-
+2. **Start the development server**:
    ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
+   npm run dev
    ```
 
-3. **Build the application**:
+### Available Scripts
 
-   ```bash
-   npm run frontend
-   ```
+- `npm run dev`: Start the development server
+- `npm run build`: Build the application for production
+- `npm run preview`: Preview the production build
+- `npm run lint`: Run ESLint
+- `npm run lint:fix`: Fix ESLint issues
 
-4. **Start the server**:
+## AI Providers
 
-   ```bash
-   npm run backend
-   ```
+The application supports the following AI providers:
 
-5. **Access the application**:
-   Open http://localhost:3080 in your browser
+### Image Generation
+- **DALL-E 3**: High-quality image generation
+- **Midjourney**: Artistic image generation
+- **Stable Diffusion**: Open-source image generation
+- **Banana**: Alternative image generation provider
 
-## 🔧 Configuring AI Endpoints
+### Video Generation
+- **Veo3**: High-quality video generation
+- **Sora2**: Advanced video generation
+- **KIE API**: Unified API for multiple AI models
 
-### OpenAI
+## Language Support
 
-Add your OpenAI API key to your `.env` file:
+The application supports:
+- **English** (en): Full support with LTR layout
+- **Arabic** (ar): Full support with RTL layout and proper typography
 
-```bash
-OPENAI_API_KEY=your_openai_api_key_here
-```
+## Security
 
-### Azure OpenAI
+- JWT-based authentication
+- Non-root Docker users
+- Private Docker networks
+- Environment variable protection
+- HTTPS support in production
 
-Configure Azure OpenAI in your `.env` file:
-
-```bash
-AZURE_OPENAI_API_KEY=your_azure_api_key
-AZURE_OPENAI_API_INSTANCE_NAME=your_azure_instance
-AZURE_OPENAI_API_DEPLOYMENT_NAME=your_azure_deployment
-AZURE_OPENAI_API_VERSION=2023-12-01-preview
-```
-
-### Anthropic
-
-Add your Anthropic API key:
-
-```bash
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-### Google AI
-
-Configure Google AI (PaLM/Gemini):
-
-```bash
-GOOGLE_API_KEY=your_google_api_key
-```
-
-### And Many More!
-
-LibreChat supports numerous AI providers. Check the [documentation](https://librechat.ai/docs) for the complete list and configuration details.
-
-## ❓ FAQ
-
-**Q: Do I need API keys for all providers?**
-A: No, you only need API keys for the providers you want to use.
-
-**Q: Can I use LibreChat commercially?**
-A: Yes, LibreChat is licensed under ISC, which allows commercial use.
-
-**Q: How do I add custom AI providers?**
-A: Check the [developer documentation](https://librechat.ai/docs/developers) for adding custom providers.
-
-**Q: Is my data secure?**
-A: LibreChat is self-hosted, so you have full control over your data. We recommend following security best practices.
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
+2. Create a feature branch
 3. Make your changes
-4. Run tests: `npm test`
-5. Submit a pull request
+4. Commit your changes
+5. Push to the branch
+6. Create a Pull Request
 
-## 📚 Documentation
+## License
 
-For comprehensive documentation, visit [librechat.ai/docs](https://librechat.ai/docs)
+This project is licensed under the MIT License. See the LICENSE file for details.
 
-## 🆘 Support
+## Support
 
-- 📖 [Documentation](https://librechat.ai/docs)
-- 💬 [Discord Community](https://discord.gg/CEZJnJt8f3)
-- 🐛 [GitHub Issues](https://github.com/danny-avila/LibreChat/issues)
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=danny-avila/LibreChat&type=Date)](https://star-history.com/#danny-avila/LibreChat&Date)
-
-## 📄 License
-
-This project is licensed under the ISC License - see the [LICENSE](LICENSE) file for details.
-
----
-
-<div align="center">
-
-**Made with ❤️ by the LibreChat community**
-
-[![GitHub sponsors](https://img.shields.io/github/sponsors/danny-avila?style=social)](https://github.com/sponsors/danny-avila)
-
-</div>
+For support and questions, please open an issue on GitHub.
