@@ -1,193 +1,201 @@
-const OpenAI = require('openai');
 const axios = require('axios');
-const FormData = require('form-data');
-const fs = require('fs');
-const sharp = require('sharp');
 
 class ImageProviderService {
   constructor() {
-    this.openai = new OpenAI({
+    // KIE API Configuration
+    this.kieConfig = {
+      baseUrl: process.env.KIE_API_URL || 'https://api.kie.ai',
+      apiKey: process.env.KIE_API_KEY,
+      timeout: 120000, // 2 minutes timeout for image generation
+    };
+
+    // Direct DALL-E 3 API Configuration (fallback)
+    this.dalle3Config = {
+      baseUrl: process.env.OPENAI_API_URL || 'https://api.openai.com/v1',
       apiKey: process.env.OPENAI_API_KEY,
-    });
-    
-    // Midjourney configuration (using Discord API or third-party service)
+      timeout: 120000,
+    };
+
+    // Direct Midjourney API Configuration (fallback)
     this.midjourneyConfig = {
+      baseUrl: process.env.MIDJOURNEY_API_URL || 'https://api.midjourney.com/v1',
       apiKey: process.env.MIDJOURNEY_API_KEY,
-      baseUrl: process.env.MIDJOURNEY_API_URL || 'https://api.midjourney.com',
+      timeout: 300000, // 5 minutes for Midjourney
     };
-    
-    // Stable Diffusion configuration
+
+    // Direct Stable Diffusion API Configuration (fallback)
     this.stableDiffusionConfig = {
+      baseUrl: process.env.STABLE_DIFFUSION_API_URL || 'https://api.stability.ai/v1',
       apiKey: process.env.STABLE_DIFFUSION_API_KEY,
-      baseUrl: process.env.STABLE_DIFFUSION_API_URL || 'https://api.stability.ai',
+      timeout: 120000,
     };
-    
-    // Banana API configuration
+
+    // Direct Banana API Configuration (fallback)
     this.bananaConfig = {
+      baseUrl: process.env.BANANA_API_URL || 'https://api.banana.dev/v1',
       apiKey: process.env.BANANA_API_KEY,
-      baseUrl: process.env.BANANA_API_URL || 'https://api.banana.dev',
+      timeout: 120000,
     };
   }
 
-  async generateImage(provider, prompt, options = {}) {
-    switch (provider) {
-      case 'dall-e-3':
-        return await this.generateDALLE3Image(prompt, options);
-      case 'midjourney':
-        return await this.generateMidjourneyImage(prompt, options);
-      case 'stable-diffusion':
-        return await this.generateStableDiffusionImage(prompt, options);
-      case 'banana':
-        return await this.generateBananaImage(prompt, options);
-      default:
-        throw new Error(`Unsupported image provider: ${provider}`);
-    }
-  }
-
-  async generateDALLE3Image(prompt, options = {}) {
+  /**
+   * Generate an image using KIE API
+   * @param {Object} params - Image generation parameters
+   * @param {string} params.prompt - Text prompt for image generation
+   * @param {string} params.negativePrompt - Negative prompt
+   * @param {Object} params.settings - Generation settings
+   * @param {string} params.model - Model to use (dalle3, midjourney, stable-diffusion, etc.)
+   * @returns {Promise<Object>} Generated image data
+   */
+  async generateImage(params) {
     try {
-      const {
-        size = '1024x1024',
-        quality = 'standard',
-        style = 'vivid',
-        n = 1,
-        model = 'dall-e-3'
-      } = options;
-
-      const response = await this.openai.images.generate({
-        model,
-        prompt,
-        n,
-        size,
-        quality,
-        style,
-        response_format: 'url',
-      });
-
-      const images = response.data.map(img => ({
-        url: img.url,
-        revisedPrompt: img.revised_prompt,
-        size,
-        providerId: img.id || null,
-        metadata: {
-          provider: 'dall-e-3',
-          model,
-          quality,
-          style,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateDALLE3Cost(size, quality, n),
-        provider: 'dall-e-3',
-        model,
-      };
-    } catch (error) {
-      console.error('DALL-E 3 API error:', error);
-      throw new Error(`DALL-E 3 API error: ${error.message}`);
-    }
-  }
-
-  async generateMidjourneyImage(prompt, options = {}) {
-    try {
-      const {
-        width = 1024,
-        height = 1024,
-        quality = 'standard',
-        steps = 20,
-        cfgScale = 7.5,
-        style = 'vivid',
-        n = 1,
-        negativePrompt = '',
-        seed = null
-      } = options;
-
-      // Midjourney API implementation (using third-party service)
+      const { prompt, negativePrompt, settings, model } = params;
+      
+      // Prepare the request payload for KIE API
       const payload = {
         prompt,
-        width,
-        height,
-        quality,
-        steps,
-        cfg_scale: cfgScale,
-        style,
-        n,
         negative_prompt: negativePrompt,
-        seed,
+        model: model || 'dalle3',
+        settings: {
+          width: settings?.width || 1024,
+          height: settings?.height || 1024,
+          steps: settings?.steps || 20,
+          cfg_scale: settings?.cfgScale || 7,
+          sampler: settings?.sampler || 'DPM++ 2M Karras',
+          style: settings?.style || 'realistic',
+          seed: settings?.seed || null,
+        },
+      };
+
+      // Make the request to KIE API
+      const response = await axios.post(
+        `${this.kieConfig.baseUrl}/v1/image/generate`,
+        payload,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: this.kieConfig.timeout,
+        }
+      );
+
+      return this.formatKieResponse(response.data);
+    } catch (error) {
+      console.error('KIE API image generation error:', error);
+      
+      // Fallback to direct API if KIE fails
+      if (params.model === 'dalle3') {
+        return this.generateDalle3Image(params);
+      } else if (params.model === 'midjourney') {
+        return this.generateMidjourneyImage(params);
+      } else if (params.model === 'stable-diffusion') {
+        return this.generateStableDiffusionImage(params);
+      } else if (params.model === 'banana') {
+        return this.generateBananaImage(params);
+      }
+      
+      throw new Error(`KIE API image generation error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate an image using DALL-E 3 API (direct fallback)
+   * @param {Object} params - Image generation parameters
+   * @returns {Promise<Object>} Generated image data
+   */
+  async generateDalle3Image(params) {
+    try {
+      const { prompt, negativePrompt, settings } = params;
+      
+      const payload = {
+        model: 'dall-e-3',
+        prompt,
+        n: 1,
+        size: `${settings?.width || 1024}x${settings?.height || 1024}`,
+        quality: settings?.quality || 'standard',
+        style: settings?.style === 'realistic' ? 'natural' : 'vivid',
       };
 
       const response = await axios.post(
-        `${this.midjourneyConfig.baseUrl}/v1/imagine`,
+        `${this.dalle3Config.baseUrl}/images/generations`,
+        payload,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.dalle3Config.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: this.dalle3Config.timeout,
+        }
+      );
+
+      return this.formatDalle3Response(response.data);
+    } catch (error) {
+      console.error('DALL-E 3 API image generation error:', error);
+      throw new Error(`DALL-E 3 API image generation error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate an image using Midjourney API (direct fallback)
+   * @param {Object} params - Image generation parameters
+   * @returns {Promise<Object>} Generated image data
+   */
+  async generateMidjourneyImage(params) {
+    try {
+      const { prompt, negativePrompt, settings } = params;
+      
+      const payload = {
+        prompt,
+        negative_prompt: negativePrompt,
+        mode: 'generation',
+        width: settings?.width || 1024,
+        height: settings?.height || 1024,
+        style: settings?.style || 'realistic',
+        seed: settings?.seed || null,
+      };
+
+      const response = await axios.post(
+        `${this.midjourneyConfig.baseUrl}/imagine`,
         payload,
         {
           headers: {
             'Authorization': `Bearer ${this.midjourneyConfig.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for image generation
+          timeout: this.midjourneyConfig.timeout,
         }
       );
 
-      const images = response.data.images.map((img, index) => ({
-        url: img.url,
-        revisedPrompt: img.revised_prompt || prompt,
-        size: `${width}x${height}`,
-        providerId: img.id || null,
-        metadata: {
-          provider: 'midjourney',
-          width,
-          height,
-          quality,
-          steps,
-          cfgScale,
-          style,
-          seed: img.seed || seed,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateMidjourneyCost(width, height, quality, n),
-        provider: 'midjourney',
-        model: 'midjourney-v6',
-      };
+      return this.formatMidjourneyResponse(response.data);
     } catch (error) {
-      console.error('Midjourney API error:', error);
-      throw new Error(`Midjourney API error: ${error.message}`);
+      console.error('Midjourney API image generation error:', error);
+      throw new Error(`Midjourney API image generation error: ${error.message}`);
     }
   }
 
-  async generateStableDiffusionImage(prompt, options = {}) {
+  /**
+   * Generate an image using Stable Diffusion API (direct fallback)
+   * @param {Object} params - Image generation parameters
+   * @returns {Promise<Object>} Generated image data
+   */
+  async generateStableDiffusionImage(params) {
     try {
-      const {
-        width = 1024,
-        height = 1024,
-        samples = 1,
-        steps = 20,
-        cfgScale = 7.5,
-        sampler = 'K_DPMPP_2M',
-        seed = null,
-        negativePrompt = '',
-        stylePreset = null
-      } = options;
-
-      // Stable Diffusion API implementation
+      const { prompt, negativePrompt, settings } = params;
+      
       const payload = {
         prompt,
         negative_prompt: negativePrompt,
-        width,
-        height,
-        samples,
-        steps,
-        cfg_scale: cfgScale,
-        sampler,
-        seed,
-        style_preset: stylePreset,
+        width: settings?.width || 1024,
+        height: settings?.height || 1024,
+        steps: settings?.steps || 20,
+        cfg_scale: settings?.cfgScale || 7,
+        sampler: settings?.sampler || 'DPM++ 2M Karras',
+        seed: settings?.seed || null,
       };
 
       const response = await axios.post(
-        `${this.stableDiffusionConfig.baseUrl}/v1/generation/stable-diffusion/text-to-image`,
+        `${this.stableDiffusionConfig.baseUrl}/text-to-image`,
         payload,
         {
           headers: {
@@ -195,564 +203,181 @@ class ImageProviderService {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for image generation
+          timeout: this.stableDiffusionConfig.timeout,
         }
       );
 
-      const images = response.data.artifacts.map((img, index) => ({
-        url: img.base64 ? `data:image/png;base64,${img.base64}` : img.url,
-        revisedPrompt: prompt,
-        size: `${width}x${height}`,
-        providerId: img.id || null,
-        metadata: {
-          provider: 'stable-diffusion',
-          width,
-          height,
-          steps,
-          cfgScale,
-          sampler,
-          seed: img.seed || seed,
-          stylePreset,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateStableDiffusionCost(width, height, steps, samples),
-        provider: 'stable-diffusion',
-        model: 'stable-diffusion-xl',
-      };
+      return this.formatStableDiffusionResponse(response.data);
     } catch (error) {
-      console.error('Stable Diffusion API error:', error);
-      throw new Error(`Stable Diffusion API error: ${error.message}`);
+      console.error('Stable Diffusion API image generation error:', error);
+      throw new Error(`Stable Diffusion API image generation error: ${error.message}`);
     }
   }
 
-  async generateBananaImage(prompt, options = {}) {
+  /**
+   * Generate an image using Banana API (direct fallback)
+   * @param {Object} params - Image generation parameters
+   * @returns {Promise<Object>} Generated image data
+   */
+  async generateBananaImage(params) {
     try {
-      const {
-        model = 'banana-image-v1',
-        width = 1024,
-        height = 1024,
-        steps = 20,
-        cfgScale = 7.5,
-        negativePrompt = '',
-        seed = null,
-        samples = 1
-      } = options;
-
-      // Banana API implementation
-      const payload = {
-        model,
-        inputs: {
-          prompt,
-          negative_prompt: negativePrompt,
-          width,
-          height,
-          num_inference_steps: steps,
-          guidance_scale: cfgScale,
-          seed,
-          num_images: samples
-        }
-      };
-
-      const response = await axios.post(
-        `${this.bananaConfig.baseUrl}/start/v1`,
-        payload,
-        {
-          headers: {
-            'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 300000, // 5 minutes timeout for image generation
-        }
-      );
-
-      const callID = response.data.callID;
+      const { prompt, negativePrompt, settings } = params;
       
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 60; // 5 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        const statusResponse = await axios.get(
-          `${this.bananaConfig.baseUrl}/status/v1/${callID}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data;
-        attempts++;
-      } while (result.status === 'IN_QUEUE' && attempts < maxAttempts);
-      
-      if (result.status !== 'COMPLETED') {
-        throw new Error(`Banana API error: Generation failed with status ${result.status}`);
-      }
-
-      const images = result.outputs.images.map((img, index) => ({
-        url: img.startsWith('data:') ? img : `data:image/png;base64,${img}`,
-        revisedPrompt: prompt,
-        size: `${width}x${height}`,
-        providerId: callID,
-        metadata: {
-          provider: 'banana',
-          model,
-          width,
-          height,
-          steps,
-          cfgScale,
-          seed: result.outputs.seed || seed,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateBananaCost(model, width, height, samples),
-        provider: 'banana',
-        model,
-      };
-    } catch (error) {
-      console.error('Banana API error:', error);
-      throw new Error(`Banana API error: ${error.message}`);
-    }
-  }
-
-  async editImage(provider, imageUrl, prompt, options = {}) {
-    switch (provider) {
-      case 'dall-e-3':
-        return await this.editDALLE3Image(imageUrl, prompt, options);
-      case 'stable-diffusion':
-        return await this.editStableDiffusionImage(imageUrl, prompt, options);
-      case 'banana':
-        return await this.editBananaImage(imageUrl, prompt, options);
-      default:
-        throw new Error(`Image editing not supported for provider: ${provider}`);
-    }
-  }
-
-  async editDALLE3Image(imageUrl, prompt, options = {}) {
-    try {
-      const response = await this.openai.images.edit({
-        image: fs.createReadStream(imageUrl),
-        prompt,
-        n: options.n || 1,
-        size: options.size || '1024x1024',
-        model: 'dall-e-3',
-      });
-
-      const images = response.data.map(img => ({
-        url: img.url,
-        revisedPrompt: img.revised_prompt,
-        size: options.size || '1024x1024',
-        providerId: img.id || null,
-        metadata: {
-          provider: 'dall-e-3',
-          model: 'dall-e-3',
-          edit: true,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateDALLE3EditCost(options.size || '1024x1024', options.n || 1),
-        provider: 'dall-e-3',
-        model: 'dall-e-3',
-      };
-    } catch (error) {
-      console.error('DALL-E 3 edit API error:', error);
-      throw new Error(`DALL-E 3 edit API error: ${error.message}`);
-    }
-  }
-
-  async editStableDiffusionImage(imageUrl, prompt, options = {}) {
-    try {
-      const {
-        width = 1024,
-        height = 1024,
-        samples = 1,
-        steps = 20,
-        cfgScale = 7.5,
-        sampler = 'K_DPMPP_2M',
-        seed = null,
-        negativePrompt = '',
-        maskImage = null
-      } = options;
-
-      // Convert image to base64 if needed
-      let imageBase64;
-      if (imageUrl.startsWith('data:')) {
-        imageBase64 = imageUrl.split(',')[1];
-      } else {
-        const imageBuffer = fs.readFileSync(imageUrl);
-        imageBase64 = imageBuffer.toString('base64');
-      }
-
-      let maskBase64 = null;
-      if (maskImage) {
-        if (maskImage.startsWith('data:')) {
-          maskBase64 = maskImage.split(',')[1];
-        } else {
-          const maskBuffer = fs.readFileSync(maskImage);
-          maskBase64 = maskBuffer.toString('base64');
-        }
-      }
-
       const payload = {
         prompt,
         negative_prompt: negativePrompt,
-        init_image: imageBase64,
-        init_image_mode: 'image_strength',
-        image_strength: 0.75,
-        width,
-        height,
-        samples,
-        steps,
-        cfg_scale: cfgScale,
-        sampler,
-        seed,
-        mask_image: maskBase64,
+        model: 'runwayml/stable-diffusion-v1-5',
+        width: settings?.width || 1024,
+        height: settings?.height || 1024,
+        num_inference_steps: settings?.steps || 20,
+        guidance_scale: settings?.cfgScale || 7,
+        seed: settings?.seed || null,
       };
 
       const response = await axios.post(
-        `${this.stableDiffusionConfig.baseUrl}/v1/generation/stable-diffusion/image-to-image`,
-        payload,
+        `${this.bananaConfig.baseUrl}/run`,
         {
-          headers: {
-            'Authorization': `Bearer ${this.stableDiffusionConfig.apiKey}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          timeout: 300000,
-        }
-      );
-
-      const images = response.data.artifacts.map((img, index) => ({
-        url: `data:image/png;base64,${img.base64}`,
-        revisedPrompt: prompt,
-        size: `${width}x${height}`,
-        providerId: img.id || null,
-        metadata: {
-          provider: 'stable-diffusion',
-          width,
-          height,
-          steps,
-          cfgScale,
-          sampler,
-          seed: img.seed || seed,
-          edit: true,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateStableDiffusionEditCost(width, height, steps, samples),
-        provider: 'stable-diffusion',
-        model: 'stable-diffusion-xl',
-      };
-    } catch (error) {
-      console.error('Stable Diffusion edit API error:', error);
-      throw new Error(`Stable Diffusion edit API error: ${error.message}`);
-    }
-  }
-
-  async editBananaImage(imageUrl, prompt, options = {}) {
-    try {
-      const {
-        model = 'banana-image-edit-v1',
-        width = 1024,
-        height = 1024,
-        steps = 20,
-        cfgScale = 7.5,
-        negativePrompt = '',
-        seed = null,
-        maskImage = null
-      } = options;
-
-      // Convert image to base64 if needed
-      let imageBase64;
-      if (imageUrl.startsWith('data:')) {
-        imageBase64 = imageUrl.split(',')[1];
-      } else {
-        const imageBuffer = fs.readFileSync(imageUrl);
-        imageBase64 = imageBuffer.toString('base64');
-      }
-
-      let maskBase64 = null;
-      if (maskImage) {
-        if (maskImage.startsWith('data:')) {
-          maskBase64 = maskImage.split(',')[1];
-        } else {
-          const maskBuffer = fs.readFileSync(maskImage);
-          maskBase64 = maskBuffer.toString('base64');
-        }
-      }
-
-      // Banana API implementation
-      const payload = {
-        model,
-        inputs: {
-          prompt,
-          negative_prompt: negativePrompt,
-          image: imageBase64,
-          mask_image: maskBase64,
-          width,
-          height,
-          num_inference_steps: steps,
-          guidance_scale: cfgScale,
-          seed
-        }
-      };
-
-      const response = await axios.post(
-        `${this.bananaConfig.baseUrl}/start/v1`,
-        payload,
+          modelKey: 'runwayml/stable-diffusion-v1-5',
+          modelInputs: payload,
+        },
         {
           headers: {
             'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for image generation
+          timeout: this.bananaConfig.timeout,
         }
       );
 
-      const callID = response.data.callID;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 60; // 5 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        const statusResponse = await axios.get(
-          `${this.bananaConfig.baseUrl}/status/v1/${callID}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data;
-        attempts++;
-      } while (result.status === 'IN_QUEUE' && attempts < maxAttempts);
-      
-      if (result.status !== 'COMPLETED') {
-        throw new Error(`Banana API error: Generation failed with status ${result.status}`);
-      }
-
-      const images = result.outputs.images.map((img, index) => ({
-        url: img.startsWith('data:') ? img : `data:image/png;base64,${img}`,
-        revisedPrompt: prompt,
-        size: `${width}x${height}`,
-        providerId: callID,
-        metadata: {
-          provider: 'banana',
-          model,
-          width,
-          height,
-          steps,
-          cfgScale,
-          seed: result.outputs.seed || seed,
-          edit: true,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateBananaCost(model, width, height, 1),
-        provider: 'banana',
-        model,
-      };
+      return this.formatBananaResponse(response.data);
     } catch (error) {
-      console.error('Banana edit API error:', error);
-      throw new Error(`Banana edit API error: ${error.message}`);
+      console.error('Banana API image generation error:', error);
+      throw new Error(`Banana API image generation error: ${error.message}`);
     }
   }
 
-  async upscaleImage(provider, imageUrl, options = {}) {
-    switch (provider) {
-      case 'stable-diffusion':
-        return await this.upscaleStableDiffusionImage(imageUrl, options);
-      case 'banana':
-        return await this.upscaleBananaImage(imageUrl, options);
-      default:
-        throw new Error(`Image upscaling not supported for provider: ${provider}`);
-    }
-  }
-
-  async upscaleStableDiffusionImage(imageUrl, options = {}) {
+  /**
+   * Edit an image using KIE API
+   * @param {string} imageUrl - URL of the image to edit
+   * @param {string} prompt - Edit prompt
+   * @param {Object} options - Edit options
+   * @returns {Promise<Object>} Edited image data
+   */
+  async editImage(imageUrl, prompt, options = {}) {
     try {
-      const {
-        width = 2048,
-        height = 2048,
-        creativity = 0.3,
-        sampler = 'K_DPMPP_2M'
-      } = options;
-
-      // Convert image to base64
-      let imageBase64;
-      if (imageUrl.startsWith('data:')) {
-        imageBase64 = imageUrl.split(',')[1];
-      } else {
-        const imageBuffer = fs.readFileSync(imageUrl);
-        imageBase64 = imageBuffer.toString('base64');
-      }
-
       const payload = {
-        image: imageBase64,
-        width,
-        height,
-        creativity,
-        sampler,
+        image_url: imageUrl,
+        prompt,
+        options: {
+          strength: options.strength || 0.7,
+          guidance_scale: options.guidanceScale || 7.5,
+          seed: options.seed || null,
+        },
       };
 
       const response = await axios.post(
-        `${this.stableDiffusionConfig.baseUrl}/v1/generation/stable-diffusion/upscale`,
+        `${this.kieConfig.baseUrl}/v1/image/edit`,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${this.stableDiffusionConfig.apiKey}`,
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
             'Content-Type': 'application/json',
-            'Accept': 'application/json',
           },
-          timeout: 300000,
+          timeout: this.kieConfig.timeout,
         }
       );
 
-      const images = response.data.artifacts.map((img, index) => ({
-        url: `data:image/png;base64,${img.base64}`,
-        revisedPrompt: 'Upscaled image',
-        size: `${width}x${height}`,
-        providerId: img.id || null,
-        metadata: {
-          provider: 'stable-diffusion',
-          width,
-          height,
-          creativity,
-          sampler,
-          upscale: true,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateStableDiffusionUpscaleCost(width, height),
-        provider: 'stable-diffusion',
-        model: 'stable-diffusion-xl',
-      };
+      return this.formatKieResponse(response.data);
     } catch (error) {
-      console.error('Stable Diffusion upscale API error:', error);
-      throw new Error(`Stable Diffusion upscale API error: ${error.message}`);
+      console.error('KIE API image edit error:', error);
+      throw new Error(`KIE API image edit error: ${error.message}`);
     }
   }
 
-  async upscaleBananaImage(imageUrl, options = {}) {
+  /**
+   * Upscale an image using KIE API
+   * @param {string} imageUrl - URL of the image to upscale
+   * @param {number} scaleFactor - Factor to upscale by (2, 4)
+   * @returns {Promise<Object>} Upscaled image data
+   */
+  async upscaleImage(imageUrl, scaleFactor = 2) {
     try {
-      const {
-        model = 'banana-upscale-v1',
-        width = 2048,
-        height = 2048,
-        creativity = 0.3
-      } = options;
-
-      // Convert image to base64
-      let imageBase64;
-      if (imageUrl.startsWith('data:')) {
-        imageBase64 = imageUrl.split(',')[1];
-      } else {
-        const imageBuffer = fs.readFileSync(imageUrl);
-        imageBase64 = imageBuffer.toString('base64');
-      }
-
-      // Banana API implementation
       const payload = {
-        model,
-        inputs: {
-          image: imageBase64,
-          width,
-          height,
-          creativity
-        }
+        image_url: imageUrl,
+        scale_factor: scaleFactor,
       };
 
       const response = await axios.post(
-        `${this.bananaConfig.baseUrl}/start/v1`,
+        `${this.kieConfig.baseUrl}/v1/image/upscale`,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for image generation
+          timeout: this.kieConfig.timeout,
         }
       );
 
-      const callID = response.data.callID;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 60; // 5 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        const statusResponse = await axios.get(
-          `${this.bananaConfig.baseUrl}/status/v1/${callID}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.bananaConfig.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data;
-        attempts++;
-      } while (result.status === 'IN_QUEUE' && attempts < maxAttempts);
-      
-      if (result.status !== 'COMPLETED') {
-        throw new Error(`Banana API error: Generation failed with status ${result.status}`);
-      }
-
-      const images = result.outputs.images.map((img, index) => ({
-        url: img.startsWith('data:') ? img : `data:image/png;base64,${img}`,
-        revisedPrompt: 'Upscaled image',
-        size: `${width}x${height}`,
-        providerId: callID,
-        metadata: {
-          provider: 'banana',
-          model,
-          width,
-          height,
-          creativity,
-          upscale: true,
-        }
-      }));
-
-      return {
-        images,
-        cost: this.calculateBananaCost(model, width, height, 1),
-        provider: 'banana',
-        model,
-      };
+      return this.formatKieResponse(response.data);
     } catch (error) {
-      console.error('Banana upscale API error:', error);
-      throw new Error(`Banana upscale API error: ${error.message}`);
+      console.error('KIE API image upscale error:', error);
+      throw new Error(`KIE API image upscale error: ${error.message}`);
     }
   }
 
+  /**
+   * Get available models from KIE API
+   * @returns {Promise<Array>} Available models
+   */
+  async getAvailableModels() {
+    try {
+      const response = await axios.get(
+        `${this.kieConfig.baseUrl}/v1/models`,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
+          },
+        }
+      );
+
+      return response.data.models || [];
+    } catch (error) {
+      console.error('KIE API get models error:', error);
+      // Return default models if API fails
+      return [
+        { id: 'dalle3', name: 'DALL-E 3', type: 'image' },
+        { id: 'midjourney', name: 'Midjourney', type: 'image' },
+        { id: 'stable-diffusion', name: 'Stable Diffusion', type: 'image' },
+        { id: 'banana', name: 'Banana', type: 'image' },
+      ];
+    }
+  }
+
+  /**
+   * Get provider capabilities
+   * @param {string} provider - Provider name
+   * @returns {Object} Provider capabilities
+   */
   async getProviderCapabilities(provider) {
     switch (provider) {
-      case 'dall-e-3':
+      case 'kie':
+        return {
+          models: ['dalle3', 'midjourney', 'stable-diffusion', 'banana'],
+          maxResolution: '2048x2048',
+          supportedFormats: ['png', 'jpg'],
+          styles: ['realistic', 'artistic', 'anime', '3d'],
+          supportsEditing: true,
+          supportsUpscaling: true,
+          maxPrompts: 4000,
+        };
+      case 'dalle3':
         return {
           models: ['dall-e-3'],
           maxResolution: '1024x1024',
-          supportedSizes: ['1024x1024', '1792x1024', '1024x1792'],
-          qualities: ['standard', 'hd'],
-          styles: ['vivid', 'natural'],
-          supportsEditing: true,
+          supportedFormats: ['png'],
+          styles: ['natural', 'vivid'],
+          supportsEditing: false,
           supportsUpscaling: false,
           maxPrompts: 4000,
         };
@@ -760,160 +385,205 @@ class ImageProviderService {
         return {
           models: ['midjourney-v6'],
           maxResolution: '2048x2048',
-          supportedSizes: ['256x256', '512x512', '1024x1024', '1792x1024', '1024x1792', '2048x2048'],
-          qualities: ['standard', 'hd'],
-          styles: ['vivid', 'natural', 'anime', 'realistic'],
-          supportsEditing: false,
+          supportedFormats: ['png', 'jpg'],
+          styles: ['realistic', 'artistic', 'anime', '3d'],
+          supportsEditing: true,
           supportsUpscaling: false,
           maxPrompts: 4000,
         };
       case 'stable-diffusion':
         return {
-          models: ['stable-diffusion-xl', 'stable-diffusion-2.1'],
+          models: ['stable-diffusion-v1-5', 'stable-diffusion-xl'],
           maxResolution: '2048x2048',
-          supportedSizes: ['256x256', '512x512', '768x768', '1024x1024', '1536x1536', '2048x2048'],
-          qualities: ['standard'],
-          styles: ['anime', 'photographic', 'digital-art', 'comic-book', 'fantasy-art'],
+          supportedFormats: ['png', 'jpg'],
+          styles: ['realistic', 'artistic', 'anime', '3d'],
           supportsEditing: true,
           supportsUpscaling: true,
           maxPrompts: 4000,
         };
       case 'banana':
         return {
-          models: ['banana-image-v1', 'banana-image-edit-v1', 'banana-upscale-v1'],
-          maxResolution: '2048x2048',
-          supportedSizes: ['256x256', '512x512', '768x768', '1024x1024', '1536x1536', '2048x2048'],
-          qualities: ['standard'],
-          styles: ['realistic', 'artistic', 'anime', '3d-render'],
-          supportsEditing: true,
-          supportsUpscaling: true,
-          maxPrompts: 4000,
+          models: ['runwayml/stable-diffusion-v1-5'],
+          maxResolution: '1024x1024',
+          supportedFormats: ['png', 'jpg'],
+          styles: ['realistic', 'artistic', 'anime', '3d'],
+          supportsEditing: false,
+          supportsUpscaling: false,
+          maxPrompts: 2000,
         };
       default:
         throw new Error(`Unsupported image provider: ${provider}`);
     }
   }
 
-  calculateDALLE3Cost(size, quality, n) {
-    // DALL-E 3 pricing (example rates)
-    const baseCost = 0.04; // $0.04 per image for standard quality
-    const hdMultiplier = quality === 'hd' ? 2 : 1;
-    const sizeMultiplier = (size === '1792x1024' || size === '1024x1792') ? 1.5 : 1;
+  /**
+   * Calculate cost for image generation
+   * @param {number} width - Image width
+   * @param {number} height - Image height
+   * @param {string} model - Model used
+   * @returns {number} Cost in USD
+   */
+  calculateCost(width, height, model) {
+    // KIE API pricing (example rates)
+    const megapixel = (width * height) / 1000000;
+    const baseCost = 0.05; // $0.05 per megapixel
     
-    return baseCost * hdMultiplier * sizeMultiplier * n;
+    const modelMultiplier = {
+      'dalle3': 1.2,
+      'midjourney': 1.5,
+      'stable-diffusion': 0.8,
+      'banana': 0.6,
+    }[model] || 1;
+    
+    return baseCost * megapixel * modelMultiplier;
   }
 
-  calculateDALLE3EditCost(size, n) {
-    // DALL-E 3 edit pricing
-    const baseCost = 0.04; // $0.04 per image
-    const sizeMultiplier = (size === '1792x1024' || size === '1024x1792') ? 1.5 : 1;
+  /**
+   * Calculate cost for image editing
+   * @param {number} width - Image width
+   * @param {number} height - Image height
+   * @param {string} model - Model used
+   * @returns {number} Cost in USD
+   */
+  calculateEditCost(width, height, model) {
+    // KIE API edit pricing (example rates)
+    const megapixel = (width * height) / 1000000;
+    const baseCost = 0.04; // $0.04 per megapixel
     
-    return baseCost * sizeMultiplier * n;
+    const modelMultiplier = {
+      'dalle3': 1.2,
+      'midjourney': 1.5,
+      'stable-diffusion': 0.8,
+      'banana': 0.6,
+    }[model] || 1;
+    
+    return baseCost * megapixel * modelMultiplier;
   }
 
-  calculateMidjourneyCost(width, height, quality, n) {
-    // Midjourney pricing (example rates)
-    const baseCost = 0.03; // $0.03 per image
-    const sizeMultiplier = (width * height) / (1024 * 1024);
-    const qualityMultiplier = quality === 'hd' ? 1.5 : 1;
+  /**
+   * Calculate cost for image upscaling
+   * @param {number} width - Image width
+   * @param {number} height - Image height
+   * @param {number} scaleFactor - Scale factor
+   * @returns {number} Cost in USD
+   */
+  calculateUpscaleCost(width, height, scaleFactor) {
+    // KIE API upscale pricing (example rates)
+    const megapixel = (width * height) / 1000000;
+    const baseCost = 0.03; // $0.03 per megapixel
     
-    return baseCost * sizeMultiplier * qualityMultiplier * n;
+    // Higher scale factor costs more
+    const scaleMultiplier = scaleFactor === 4 ? 1.5 : 1;
+    
+    return baseCost * megapixel * scaleMultiplier;
   }
 
-  calculateStableDiffusionCost(width, height, steps, samples) {
-    // Stable Diffusion pricing (example rates)
-    const baseCost = 0.01; // $0.01 per image
-    const sizeMultiplier = (width * height) / (1024 * 1024);
-    const stepsMultiplier = steps / 20;
-    
-    return baseCost * sizeMultiplier * stepsMultiplier * samples;
+  /**
+   * Format KIE API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatKieResponse(data) {
+    return {
+      id: data.id,
+      imageUrl: data.image_url,
+      thumbnailUrl: data.thumbnail_url,
+      status: data.status,
+      prompt: data.prompt,
+      model: data.model,
+      width: data.width,
+      height: data.height,
+      style: data.style,
+      createdAt: data.created_at,
+      cost: this.calculateCost(data.width, data.height, data.model),
+    };
   }
 
-  calculateStableDiffusionEditCost(width, height, steps, samples) {
-    // Stable Diffusion edit pricing
-    const baseCost = 0.015; // $0.015 per image
-    const sizeMultiplier = (width * height) / (1024 * 1024);
-    const stepsMultiplier = steps / 20;
-    
-    return baseCost * sizeMultiplier * stepsMultiplier * samples;
+  /**
+   * Format DALL-E 3 API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatDalle3Response(data) {
+    const image = data.data[0];
+    return {
+      id: image.url,
+      imageUrl: image.url,
+      thumbnailUrl: image.url,
+      status: 'completed',
+      prompt: data.prompt,
+      model: 'dalle3',
+      width: 1024,
+      height: 1024,
+      style: data.style === 'natural' ? 'realistic' : 'artistic',
+      createdAt: new Date().toISOString(),
+      cost: this.calculateCost(1024, 1024, 'dalle3'),
+    };
   }
 
-  calculateStableDiffusionUpscaleCost(width, height) {
-    // Stable Diffusion upscale pricing
-    const baseCost = 0.02; // $0.02 per image
-    const sizeMultiplier = (width * height) / (1024 * 1024);
-    
-    return baseCost * sizeMultiplier;
+  /**
+   * Format Midjourney API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatMidjourneyResponse(data) {
+    return {
+      id: data.id,
+      imageUrl: data.image_url,
+      thumbnailUrl: data.thumbnail_url,
+      status: data.status,
+      prompt: data.prompt,
+      model: 'midjourney',
+      width: data.width || 1024,
+      height: data.height || 1024,
+      style: data.style,
+      createdAt: data.created_at,
+      cost: this.calculateCost(data.width || 1024, data.height || 1024, 'midjourney'),
+    };
   }
 
-  calculateBananaCost(model, width, height, samples) {
-    // Banana API pricing (example rates)
-    const baseCost = 0.02; // $0.02 per image
-    const sizeMultiplier = (width * height) / (1024 * 1024);
-    
-    // Adjust cost based on model type
-    let modelMultiplier = 1;
-    if (model.includes('edit')) {
-      modelMultiplier = 1.2;
-    } else if (model.includes('upscale')) {
-      modelMultiplier = 1.5;
-    }
-    
-    return baseCost * sizeMultiplier * modelMultiplier * samples;
+  /**
+   * Format Stable Diffusion API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatStableDiffusionResponse(data) {
+    const image = data.images[0];
+    return {
+      id: data.id,
+      imageUrl: `data:image/png;base64,${image}`,
+      thumbnailUrl: `data:image/png;base64,${image}`,
+      status: 'completed',
+      prompt: data.prompt,
+      model: 'stable-diffusion',
+      width: data.width || 1024,
+      height: data.height || 1024,
+      style: 'realistic',
+      createdAt: new Date().toISOString(),
+      cost: this.calculateCost(data.width || 1024, data.height || 1024, 'stable-diffusion'),
+    };
   }
 
-  async processImage(imageUrl, options = {}) {
-    const {
-      resize = null,
-      format = 'png',
-      quality = 90,
-      optimize = true
-    } = options;
-
-    try {
-      let imageBuffer;
-      
-      if (imageUrl.startsWith('data:')) {
-        // Extract base64 data
-        const base64Data = imageUrl.split(',')[1];
-        imageBuffer = Buffer.from(base64Data, 'base64');
-      } else {
-        // Read from file system
-        imageBuffer = fs.readFileSync(imageUrl);
-      }
-
-      let image = sharp(imageBuffer);
-
-      // Apply resize if specified
-      if (resize) {
-        image = image.resize(resize.width, resize.height, {
-          fit: resize.fit || 'cover',
-          position: resize.position || 'center'
-        });
-      }
-
-      // Apply format and quality
-      const formatOptions = {};
-      if (format === 'jpeg') {
-        formatOptions.quality = quality;
-      } else if (format === 'png') {
-        formatOptions.compressionLevel = optimize ? 9 : 6;
-      } else if (format === 'webp') {
-        formatOptions.quality = quality;
-      }
-
-      imageBuffer = await image.toFormat(format, formatOptions).toBuffer();
-
-      return {
-        url: `data:image/${format};base64,${imageBuffer.toString('base64')}`,
-        size: imageBuffer.length,
-        format,
-        metadata: await sharp(imageBuffer).metadata()
-      };
-    } catch (error) {
-      console.error('Image processing error:', error);
-      throw new Error(`Image processing error: ${error.message}`);
-    }
+  /**
+   * Format Banana API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatBananaResponse(data) {
+    const image = data.modelOutputs[0].image_base64;
+    return {
+      id: data.id,
+      imageUrl: `data:image/png;base64,${image}`,
+      thumbnailUrl: `data:image/png;base64,${image}`,
+      status: 'completed',
+      prompt: data.modelInputs.prompt,
+      model: 'banana',
+      width: data.modelInputs.width || 1024,
+      height: data.modelInputs.height || 1024,
+      style: 'realistic',
+      createdAt: new Date().toISOString(),
+      cost: this.calculateCost(data.modelInputs.width || 1024, data.modelInputs.height || 1024, 'banana'),
+    };
   }
 }
 

@@ -1,147 +1,105 @@
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 
 class VideoProviderService {
   constructor() {
-    // Kuaishou (Kuai) API configuration
-    this.kuaishouConfig = {
-      apiKey: process.env.KUAISHOU_API_KEY,
-      baseUrl: process.env.KUAISHOU_API_URL || 'https://open.kuaishou.com',
+    // KIE API Configuration
+    this.kieConfig = {
+      baseUrl: process.env.KIE_API_URL || 'https://api.kie.ai',
+      apiKey: process.env.KIE_API_KEY,
+      timeout: 300000, // 5 minutes timeout for video generation
     };
-    
-    // Veo3 API configuration
+
+    // Direct Veo3 API Configuration (fallback)
     this.veo3Config = {
-      apiKey: process.env.VEO3_API_KEY,
       baseUrl: process.env.VEO3_API_URL || 'https://api.veo3.ai',
+      apiKey: process.env.VEO3_API_KEY,
+      timeout: 300000,
     };
-    
-    // Sora2 API configuration
+
+    // Direct Sora2 API Configuration (fallback)
     this.sora2Config = {
+      baseUrl: process.env.SORA2_API_URL || 'https://api.sora2.ai',
       apiKey: process.env.SORA2_API_KEY,
-      baseUrl: process.env.SORA2_API_URL || 'https://api.sora2.openai.com',
+      timeout: 300000,
     };
   }
 
-  async generateVideo(provider, prompt, options = {}) {
-    switch (provider) {
-      case 'kuaishou':
-        return await this.generateKuaishouVideo(prompt, options);
-      case 'veo3':
-        return await this.generateVeo3Video(prompt, options);
-      case 'sora2':
-        return await this.generateSora2Video(prompt, options);
-      default:
-        throw new Error(`Unsupported video provider: ${provider}`);
-    }
-  }
-
-  async generateKuaishouVideo(prompt, options = {}) {
+  /**
+   * Generate a video using KIE API
+   * @param {Object} params - Video generation parameters
+   * @param {string} params.prompt - Text prompt for video generation
+   * @param {string} params.negativePrompt - Negative prompt
+   * @param {Object} params.settings - Generation settings
+   * @param {string} params.model - Model to use (veo3, sora2, etc.)
+   * @returns {Promise<Object>} Generated video data
+   */
+  async generateVideo(params) {
     try {
-      const {
-        duration = 5, // in seconds
-        resolution = '720p',
-        style = 'realistic',
-        aspectRatio = '16:9',
-        negativePrompt = '',
-        seed = null
-      } = options;
-
-      // Kuaishou API implementation
+      const { prompt, negativePrompt, settings, model } = params;
+      
+      // Prepare the request payload for KIE API
       const payload = {
         prompt,
         negative_prompt: negativePrompt,
-        duration,
-        resolution,
-        style,
-        aspect_ratio: aspectRatio,
-        seed,
+        model: model || 'veo3',
+        settings: {
+          duration: settings?.duration || 10,
+          resolution: settings?.resolution || '1080p',
+          style: settings?.style || 'cinematic',
+          aspect_ratio: settings?.aspectRatio || '16:9',
+          motion_strength: settings?.motionStrength || 0.9,
+          seed: settings?.seed || null,
+        },
       };
 
+      // Make the request to KIE API
       const response = await axios.post(
-        `${this.kuaishouConfig.baseUrl}/rest/others/v1/video/generation/submit`,
+        `${this.kieConfig.baseUrl}/v1/video/generate`,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${this.kuaishouConfig.apiKey}`,
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for video generation
+          timeout: this.kieConfig.timeout,
         }
       );
 
-      const taskId = response.data.result.task_id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 120; // 10 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        const statusResponse = await axios.get(
-          `${this.kuaishouConfig.baseUrl}/rest/others/v1/video/generation/query`,
-          {
-            params: {
-              task_id: taskId
-            },
-            headers: {
-              'Authorization': `Bearer ${this.kuaishouConfig.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data.result;
-        attempts++;
-      } while (result.status === 'PROCESSING' && attempts < maxAttempts);
-      
-      if (result.status !== 'SUCCESS') {
-        throw new Error(`Kuaishou API error: Generation failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.video_url,
-        thumbnailUrl: result.thumbnail_url,
-        duration: result.duration,
-        resolution: result.resolution,
-        providerId: taskId,
-        metadata: {
-          provider: 'kuaishou',
-          prompt,
-          style,
-          aspectRatio,
-          seed: result.seed || seed,
-        },
-        cost: this.calculateKuaishouCost(duration, resolution),
-        provider: 'kuaishou',
-      };
+      return this.formatKieResponse(response.data);
     } catch (error) {
-      console.error('Kuaishou API error:', error);
-      throw new Error(`Kuaishou API error: ${error.message}`);
+      console.error('KIE API video generation error:', error);
+      
+      // Fallback to direct API if KIE fails
+      if (params.model === 'veo3') {
+        return this.generateVeo3Video(params);
+      } else if (params.model === 'sora2') {
+        return this.generateSora2Video(params);
+      }
+      
+      throw new Error(`KIE API video generation error: ${error.message}`);
     }
   }
 
-  async generateVeo3Video(prompt, options = {}) {
+  /**
+   * Generate a video using Veo3 API (direct fallback)
+   * @param {Object} params - Video generation parameters
+   * @returns {Promise<Object>} Generated video data
+   */
+  async generateVeo3Video(params) {
     try {
-      const {
-        duration = 10, // in seconds
-        resolution = '1080p',
-        style = 'cinematic',
-        aspectRatio = '16:9',
-        negativePrompt = '',
-        seed = null,
-        motionStrength = 0.9
-      } = options;
-
-      // Veo3 API implementation
+      const { prompt, negativePrompt, settings } = params;
+      
       const payload = {
         prompt,
         negative_prompt: negativePrompt,
-        duration,
-        resolution,
-        style,
-        aspect_ratio: aspectRatio,
-        seed,
-        motion_strength: motionStrength,
+        settings: {
+          duration: settings?.duration || 15,
+          resolution: settings?.resolution || '1080p',
+          style: settings?.style || 'cinematic',
+          aspect_ratio: settings?.aspectRatio || '16:9',
+          motion_strength: settings?.motionStrength || 0.9,
+          seed: settings?.seed || null,
+        },
       };
 
       const response = await axios.post(
@@ -152,403 +110,118 @@ class VideoProviderService {
             'Authorization': `Bearer ${this.veo3Config.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for video generation
+          timeout: this.veo3Config.timeout,
         }
       );
 
-      const taskId = response.data.task_id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 180; // 15 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
-        const statusResponse = await axios.get(
-          `${this.veo3Config.baseUrl}/v1/status/${taskId}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.veo3Config.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data;
-        attempts++;
-      } while (result.status === 'processing' && attempts < maxAttempts);
-      
-      if (result.status !== 'completed') {
-        throw new Error(`Veo3 API error: Generation failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.output.video_url,
-        thumbnailUrl: result.output.thumbnail_url,
-        duration: result.output.duration,
-        resolution: result.output.resolution,
-        providerId: taskId,
-        metadata: {
-          provider: 'veo3',
-          prompt,
-          style,
-          aspectRatio,
-          motionStrength,
-          seed: result.output.seed || seed,
-        },
-        cost: this.calculateVeo3Cost(duration, resolution),
-        provider: 'veo3',
-      };
+      return this.formatVeo3Response(response.data);
     } catch (error) {
-      console.error('Veo3 API error:', error);
-      throw new Error(`Veo3 API error: ${error.message}`);
+      console.error('Veo3 API video generation error:', error);
+      throw new Error(`Veo3 API video generation error: ${error.message}`);
     }
   }
 
-  async generateSora2Video(prompt, options = {}) {
+  /**
+   * Generate a video using Sora2 API (direct fallback)
+   * @param {Object} params - Video generation parameters
+   * @returns {Promise<Object>} Generated video data
+   */
+  async generateSora2Video(params) {
     try {
-      const {
-        duration = 15, // in seconds
-        resolution = '1080p',
-        style = 'realistic',
-        aspectRatio = '16:9',
-        negativePrompt = '',
-        seed = null,
-        motionVector = null,
-        keyframes = null
-      } = options;
-
-      // Sora2 API implementation
+      const { prompt, negativePrompt, settings } = params;
+      
       const payload = {
-        model: 'sora-2',
         prompt,
         negative_prompt: negativePrompt,
-        max_tokens: duration * 30, // Approximate tokens per second
-        size: `${aspectRatio.split(':')[0]}*${aspectRatio.split(':')[1]}`,
-        quality: resolution === '4k' ? 'hd' : 'standard',
-        style,
-        seed,
-      };
-
-      // Add optional parameters
-      if (motionVector) {
-        payload.motion_vector = motionVector;
-      }
-      
-      if (keyframes && keyframes.length > 0) {
-        payload.keyframes = keyframes;
-      }
-
-      const response = await this.openai.images.generateVideo(payload);
-
-      const taskId = response.id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 240; // 20 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15 seconds
-        result = await this.openai.videos.retrieve(taskId);
-        attempts++;
-      } while (result.status === 'pending' || result.status === 'running' && attempts < maxAttempts);
-      
-      if (result.status !== 'succeeded') {
-        throw new Error(`Sora2 API error: Generation failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.url,
-        thumbnailUrl: result.thumbnail_url,
-        duration: result.duration,
-        resolution: result.size,
-        providerId: result.id,
-        metadata: {
-          provider: 'sora2',
-          prompt,
-          style,
-          aspectRatio,
-          motionVector,
-          seed: result.seed || seed,
+        settings: {
+          duration: settings?.duration || 30,
+          resolution: settings?.resolution || '1080p',
+          style: settings?.style || 'realistic',
+          aspect_ratio: settings?.aspectRatio || '16:9',
+          seed: settings?.seed || null,
         },
-        cost: this.calculateSora2Cost(duration, resolution),
-        provider: 'sora2',
-      };
-    } catch (error) {
-      console.error('Sora2 API error:', error);
-      throw new Error(`Sora2 API error: ${error.message}`);
-    }
-  }
-
-  async editVideo(provider, videoUrl, prompt, options = {}) {
-    switch (provider) {
-      case 'kuaishou':
-        return await this.editKuaishouVideo(videoUrl, prompt, options);
-      case 'veo3':
-        return await this.editVeo3Video(videoUrl, prompt, options);
-      case 'sora2':
-        return await this.editSora2Video(videoUrl, prompt, options);
-      default:
-        throw new Error(`Video editing not supported for provider: ${provider}`);
-    }
-  }
-
-  async editKuaishouVideo(videoUrl, prompt, options = {}) {
-    try {
-      const {
-        startTime = 0,
-        endTime = null,
-        strength = 0.8,
-        negativePrompt = '',
-        seed = null
-      } = options;
-
-      // Upload video to Kuaishou
-      const videoUploadResponse = await this.uploadVideoToKuaishou(videoUrl);
-      const videoId = videoUploadResult.data.result.video_id;
-
-      // Kuaishou API implementation for editing
-      const payload = {
-        video_id: videoId,
-        prompt,
-        negative_prompt: negativePrompt,
-        start_time: startTime,
-        end_time: endTime,
-        strength,
-        seed,
       };
 
       const response = await axios.post(
-        `${this.kuaishouConfig.baseUrl}/rest/others/v1/video/edit/submit`,
+        `${this.sora2Config.baseUrl}/v1/videos/generations`,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${this.kuaishouConfig.apiKey}`,
+            'Authorization': `Bearer ${this.sora2Config.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for video editing
+          timeout: this.sora2Config.timeout,
         }
       );
 
-      const taskId = response.data.result.task_id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 180; // 15 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        const statusResponse = await axios.get(
-          `${this.kuaishouConfig.baseUrl}/rest/others/v1/video/edit/query`,
-          {
-            params: {
-              task_id: taskId
-            },
-            headers: {
-              'Authorization': `Bearer ${this.kuaishouConfig.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data.result;
-        attempts++;
-      } while (result.status === 'PROCESSING' && attempts < maxAttempts);
-      
-      if (result.status !== 'SUCCESS') {
-        throw new Error(`Kuaishou API error: Editing failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.video_url,
-        thumbnailUrl: result.thumbnail_url,
-        duration: result.duration,
-        resolution: result.resolution,
-        providerId: taskId,
-        metadata: {
-          provider: 'kuaishou',
-          prompt,
-          startTime,
-          endTime,
-          strength,
-          seed: result.seed || seed,
-          edit: true,
-        },
-        cost: this.calculateKuaishouEditCost(result.duration, result.resolution),
-        provider: 'kuaishou',
-      };
+      return this.formatSora2Response(response.data);
     } catch (error) {
-      console.error('Kuaishou edit API error:', error);
-      throw new Error(`Kuaishou edit API error: ${error.message}`);
+      console.error('Sora2 API video generation error:', error);
+      throw new Error(`Sora2 API video generation error: ${error.message}`);
     }
   }
 
-  async editVeo3Video(videoUrl, prompt, options = {}) {
+  /**
+   * Edit a video using KIE API
+   * @param {string} videoId - ID of the video to edit
+   * @param {string} prompt - Edit prompt
+   * @param {Object} options - Edit options
+   * @returns {Promise<Object>} Edited video data
+   */
+  async editVideo(videoId, prompt, options = {}) {
     try {
-      const {
-        startTime = 0,
-        endTime = null,
-        strength = 0.8,
-        negativePrompt = '',
-        seed = null
-      } = options;
-
-      // Upload video to Veo3
-      const videoUploadResponse = await this.uploadVideoToVeo3(videoUrl);
-      const videoId = videoUploadResult.data.video_id;
-
-      // Veo3 API implementation for editing
       const payload = {
         video_id: videoId,
         prompt,
-        negative_prompt: negativePrompt,
-        start_time: startTime,
-        end_time: endTime,
-        strength,
-        seed,
+        options: {
+          strength: options.strength || 0.7,
+          guidance_scale: options.guidanceScale || 7.5,
+          seed: options.seed || null,
+        },
       };
 
       const response = await axios.post(
-        `${this.veo3Config.baseUrl}/v1/edit`,
+        `${this.kieConfig.baseUrl}/v1/video/edit`,
         payload,
         {
           headers: {
-            'Authorization': `Bearer ${this.veo3Config.apiKey}`,
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 300000, // 5 minutes timeout for video editing
+          timeout: this.kieConfig.timeout,
         }
       );
 
-      const taskId = response.data.task_id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 180; // 15 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
-        const statusResponse = await axios.get(
-          `${this.veo3Config.baseUrl}/v1/status/${taskId}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.veo3Config.apiKey}`,
-            }
-          }
-        );
-        result = statusResponse.data;
-        attempts++;
-      } while (result.status === 'processing' && attempts < maxAttempts);
-      
-      if (result.status !== 'completed') {
-        throw new Error(`Veo3 API error: Editing failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.output.video_url,
-        thumbnailUrl: result.output.thumbnail_url,
-        duration: result.output.duration,
-        resolution: result.output.resolution,
-        providerId: taskId,
-        metadata: {
-          provider: 'veo3',
-          prompt,
-          startTime,
-          endTime,
-          strength,
-          seed: result.output.seed || seed,
-          edit: true,
-        },
-        cost: this.calculateVeo3EditCost(result.output.duration, result.output.resolution),
-        provider: 'veo3',
-      };
+      return this.formatKieResponse(response.data);
     } catch (error) {
-      console.error('Veo3 edit API error:', error);
-      throw new Error(`Veo3 edit API error: ${error.message}`);
+      console.error('KIE API video edit error:', error);
+      throw new Error(`KIE API video edit error: ${error.message}`);
     }
   }
 
-  async editSora2Video(videoUrl, prompt, options = {}) {
-    try {
-      const {
-        startTime = 0,
-        endTime = null,
-        strength = 0.8,
-        negativePrompt = '',
-        seed = null
-      } = options;
-
-      // Upload video to Sora2
-      const videoUploadResponse = await this.uploadVideoToSora2(videoUrl);
-      const fileId = videoUploadResponse.id;
-
-      // Sora2 API implementation for editing
-      const payload = {
-        model: 'sora-2',
-        file_id: fileId,
-        prompt,
-        negative_prompt: negativePrompt,
-        start_time: startTime,
-        end_time: endTime,
-        strength,
-        seed,
-      };
-
-      const response = await this.openai.videos.edit(payload);
-
-      const taskId = response.id;
-      
-      // Poll for results
-      let result;
-      let attempts = 0;
-      const maxAttempts = 240; // 20 minutes max wait time
-      
-      do {
-        await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15 seconds
-        result = await this.openai.videos.retrieve(taskId);
-        attempts++;
-      } while (result.status === 'pending' || result.status === 'running' && attempts < maxAttempts);
-      
-      if (result.status !== 'succeeded') {
-        throw new Error(`Sora2 API error: Editing failed with status ${result.status}`);
-      }
-
-      return {
-        videoUrl: result.url,
-        thumbnailUrl: result.thumbnail_url,
-        duration: result.duration,
-        resolution: result.size,
-        providerId: result.id,
-        metadata: {
-          provider: 'sora2',
-          prompt,
-          startTime,
-          endTime,
-          strength,
-          seed: result.seed || seed,
-          edit: true,
-        },
-        cost: this.calculateSora2EditCost(result.duration, result.size),
-        provider: 'sora2',
-      };
-    } catch (error) {
-      console.error('Sora2 edit API error:', error);
-      throw new Error(`Sora2 edit API error: ${error.message}`);
-    }
-  }
-
-  async uploadVideoToKuaishou(videoUrl) {
+  /**
+   * Upload a video to KIE API for editing
+   * @param {string|Buffer} videoUrl - URL or buffer of the video to upload
+   * @returns {Promise<Object>} Uploaded video data
+   */
+  async uploadVideo(videoUrl) {
     try {
       let videoBuffer;
-      if (videoUrl.startsWith('http')) {
+      
+      if (typeof videoUrl === 'string' && videoUrl.startsWith('http')) {
         // Download video from URL
         const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
         videoBuffer = Buffer.from(response.data, 'binary');
-      } else {
+      } else if (typeof videoUrl === 'string') {
         // Read video from file system
+        const fs = require('fs');
         videoBuffer = fs.readFileSync(videoUrl);
+      } else {
+        // Use provided buffer
+        videoBuffer = videoUrl;
       }
 
+      const FormData = require('form-data');
       const formData = new FormData();
       formData.append('video', videoBuffer, {
         filename: `video-${Date.now()}.mp4`,
@@ -556,102 +229,66 @@ class VideoProviderService {
       });
 
       const response = await axios.post(
-        `${this.kuaishouConfig.baseUrl}/rest/others/v1/video/upload`,
+        `${this.kieConfig.baseUrl}/v1/video/upload`,
         formData,
         {
           headers: {
-            'Authorization': `Bearer ${this.kuaishouConfig.apiKey}`,
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
             ...formData.getHeaders(),
           },
-          timeout: 300000, // 5 minutes timeout for video upload
+          timeout: this.kieConfig.timeout,
         }
       );
 
-      return response;
+      return response.data;
     } catch (error) {
-      console.error('Kuaishou upload error:', error);
-      throw new Error(`Kuaishou upload error: ${error.message}`);
+      console.error('KIE API video upload error:', error);
+      throw new Error(`KIE API video upload error: ${error.message}`);
     }
   }
 
-  async uploadVideoToVeo3(videoUrl) {
+  /**
+   * Get available models from KIE API
+   * @returns {Promise<Array>} Available models
+   */
+  async getAvailableModels() {
     try {
-      let videoBuffer;
-      if (videoUrl.startsWith('http')) {
-        // Download video from URL
-        const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
-        videoBuffer = Buffer.from(response.data, 'binary');
-      } else {
-        // Read video from file system
-        videoBuffer = fs.readFileSync(videoUrl);
-      }
-
-      const formData = new FormData();
-      formData.append('video', videoBuffer, {
-        filename: `video-${Date.now()}.mp4`,
-        contentType: 'video/mp4',
-      });
-
-      const response = await axios.post(
-        `${this.veo3Config.baseUrl}/v1/upload`,
-        formData,
+      const response = await axios.get(
+        `${this.kieConfig.baseUrl}/v1/models`,
         {
           headers: {
-            'Authorization': `Bearer ${this.veo3Config.apiKey}`,
-            ...formData.getHeaders(),
+            'Authorization': `Bearer ${this.kieConfig.apiKey}`,
           },
-          timeout: 300000, // 5 minutes timeout for video upload
         }
       );
 
-      return response;
+      return response.data.models || [];
     } catch (error) {
-      console.error('Veo3 upload error:', error);
-      throw new Error(`Veo3 upload error: ${error.message}`);
+      console.error('KIE API get models error:', error);
+      // Return default models if API fails
+      return [
+        { id: 'veo3', name: 'Veo3', type: 'video' },
+        { id: 'sora2', name: 'Sora2', type: 'video' },
+      ];
     }
   }
 
-  async uploadVideoToSora2(videoUrl) {
-    try {
-      let videoBuffer;
-      if (videoUrl.startsWith('http')) {
-        // Download video from URL
-        const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
-        videoBuffer = Buffer.from(response.data, 'binary');
-      } else {
-        // Read video from file system
-        videoBuffer = fs.readFileSync(videoUrl);
-      }
-
-      const formData = new FormData();
-      formData.append('file', videoBuffer, {
-        filename: `video-${Date.now()}.mp4`,
-        contentType: 'video/mp4',
-      });
-
-      const response = await this.openai.files.create({
-        file: videoBuffer,
-        purpose: 'vision',
-      });
-
-      return response;
-    } catch (error) {
-      console.error('Sora2 upload error:', error);
-      throw new Error(`Sora2 upload error: ${error.message}`);
-    }
-  }
-
+  /**
+   * Get provider capabilities
+   * @param {string} provider - Provider name
+   * @returns {Object} Provider capabilities
+   */
   async getProviderCapabilities(provider) {
     switch (provider) {
-      case 'kuaishou':
+      case 'kie':
         return {
-          models: ['kuaishou-v1'],
-          maxDuration: 30, // seconds
-          supportedResolutions: ['480p', '720p', '1080p'],
-          supportedAspectRatios: ['16:9', '9:16', '1:1'],
-          styles: ['realistic', 'anime', 'artistic', 'cinematic'],
+          models: ['veo3', 'sora2'],
+          maxDuration: 120, // seconds
+          supportedResolutions: ['720p', '1080p', '4k'],
+          supportedAspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:2'],
+          styles: ['realistic', 'cinematic', 'documentary', 'animation'],
           supportsEditing: true,
-          maxPrompts: 2000,
+          maxPrompts: 4000,
         };
       case 'veo3':
         return {
@@ -678,32 +315,15 @@ class VideoProviderService {
     }
   }
 
-  calculateKuaishouCost(duration, resolution) {
-    // Kuaishou pricing (example rates)
-    const baseCost = 0.05; // $0.05 per second
-    const resolutionMultiplier = {
-      '480p': 1,
-      '720p': 1.5,
-      '1080p': 2,
-    }[resolution] || 1;
-    
-    return baseCost * duration * resolutionMultiplier;
-  }
-
-  calculateVeo3Cost(duration, resolution) {
-    // Veo3 pricing (example rates)
-    const baseCost = 0.08; // $0.08 per second
-    const resolutionMultiplier = {
-      '720p': 1,
-      '1080p': 1.5,
-      '4k': 2.5,
-    }[resolution] || 1;
-    
-    return baseCost * duration * resolutionMultiplier;
-  }
-
-  calculateSora2Cost(duration, resolution) {
-    // Sora2 pricing (example rates)
+  /**
+   * Calculate cost for video generation
+   * @param {number} duration - Video duration in seconds
+   * @param {string} resolution - Video resolution
+   * @param {string} model - Model used
+   * @returns {number} Cost in USD
+   */
+  calculateCost(duration, resolution, model) {
+    // KIE API pricing (example rates)
     const baseCost = 0.1; // $0.1 per second
     const resolutionMultiplier = {
       '720p': 1,
@@ -711,35 +331,23 @@ class VideoProviderService {
       '4k': 3,
     }[resolution] || 1;
     
-    return baseCost * duration * resolutionMultiplier;
-  }
-
-  calculateKuaishouEditCost(duration, resolution) {
-    // Kuaishou edit pricing (example rates)
-    const baseCost = 0.03; // $0.03 per second
-    const resolutionMultiplier = {
-      '480p': 1,
-      '720p': 1.5,
-      '1080p': 2,
-    }[resolution] || 1;
+    const modelMultiplier = {
+      'veo3': 1.2,
+      'sora2': 1.5,
+    }[model] || 1;
     
-    return baseCost * duration * resolutionMultiplier;
+    return baseCost * duration * resolutionMultiplier * modelMultiplier;
   }
 
-  calculateVeo3EditCost(duration, resolution) {
-    // Veo3 edit pricing (example rates)
-    const baseCost = 0.05; // $0.05 per second
-    const resolutionMultiplier = {
-      '720p': 1,
-      '1080p': 1.5,
-      '4k': 2.5,
-    }[resolution] || 1;
-    
-    return baseCost * duration * resolutionMultiplier;
-  }
-
-  calculateSora2EditCost(duration, resolution) {
-    // Sora2 edit pricing (example rates)
+  /**
+   * Calculate cost for video editing
+   * @param {number} duration - Video duration in seconds
+   * @param {string} resolution - Video resolution
+   * @param {string} model - Model used
+   * @returns {number} Cost in USD
+   */
+  calculateEditCost(duration, resolution, model) {
+    // KIE API edit pricing (example rates)
     const baseCost = 0.08; // $0.08 per second
     const resolutionMultiplier = {
       '720p': 1,
@@ -747,7 +355,78 @@ class VideoProviderService {
       '4k': 3,
     }[resolution] || 1;
     
-    return baseCost * duration * resolutionMultiplier;
+    const modelMultiplier = {
+      'veo3': 1.2,
+      'sora2': 1.5,
+    }[model] || 1;
+    
+    return baseCost * duration * resolutionMultiplier * modelMultiplier;
+  }
+
+  /**
+   * Format KIE API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatKieResponse(data) {
+    return {
+      id: data.id,
+      videoUrl: data.video_url,
+      thumbnailUrl: data.thumbnail_url,
+      status: data.status,
+      prompt: data.prompt,
+      model: data.model,
+      duration: data.duration,
+      resolution: data.resolution,
+      style: data.style,
+      aspectRatio: data.aspect_ratio,
+      createdAt: data.created_at,
+      cost: this.calculateCost(data.duration, data.resolution, data.model),
+    };
+  }
+
+  /**
+   * Format Veo3 API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatVeo3Response(data) {
+    return {
+      id: data.id,
+      videoUrl: data.video_url,
+      thumbnailUrl: data.thumbnail_url,
+      status: data.status,
+      prompt: data.prompt,
+      model: 'veo3',
+      duration: data.duration,
+      resolution: data.resolution,
+      style: data.style,
+      aspectRatio: data.aspect_ratio,
+      createdAt: data.created_at,
+      cost: this.calculateCost(data.duration, data.resolution, 'veo3'),
+    };
+  }
+
+  /**
+   * Format Sora2 API response
+   * @param {Object} data - Raw response data
+   * @returns {Object} Formatted response
+   */
+  formatSora2Response(data) {
+    return {
+      id: data.id,
+      videoUrl: data.video_url,
+      thumbnailUrl: data.thumbnail_url,
+      status: data.status,
+      prompt: data.prompt,
+      model: 'sora2',
+      duration: data.duration,
+      resolution: data.resolution,
+      style: data.style,
+      aspectRatio: data.aspect_ratio,
+      createdAt: data.created_at,
+      cost: this.calculateCost(data.duration, data.resolution, 'sora2'),
+    };
   }
 }
 

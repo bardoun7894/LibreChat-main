@@ -1,0 +1,25 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="orninaGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF6B6B;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#4ECDC4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#45B7D1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#orninaGradient)" opacity="0.1"/>
+  
+  <!-- Main logo shape - stylized "O" for Ornina -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="url(#orninaGradient)" stroke-width="12"/>
+  
+  <!-- Inner decorative elements -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="url(#orninaGradient)" stroke-width="6" opacity="0.7"/>
+  <circle cx="256" cy="256" r="100" fill="none" stroke="url(#orninaGradient)" stroke-width="4" opacity="0.5"/>
+  
+  <!-- Center dot -->
+  <circle cx="256" cy="256" r="8" fill="url(#orninaGradient)"/>
+  
+  <!-- Ornina text placeholder -->
+  <text x="256" y="420" font-family="Arial, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="url(#orninaGradient)">ORNINA</text>
+</svg>

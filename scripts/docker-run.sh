@@ -28,289 +28,165 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if Docker is installed
+# Function to check if Docker is running
 check_docker() {
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed. Please install Docker first."
+    if ! docker info > /dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker and try again."
         exit 1
     fi
-    
+}
+
+# Function to check if docker-compose is installed
+check_docker_compose() {
     if ! command -v docker-compose &> /dev/null; then
-        print_error "Docker Compose is not installed. Please install Docker Compose first."
+        print_error "docker-compose is not installed. Please install docker-compose and try again."
         exit 1
     fi
-    
-    print_success "Docker and Docker Compose are installed."
 }
 
-# Check if .env file exists
-check_env_file() {
+# Function to create .env file if it doesn't exist
+create_env_file() {
     if [ ! -f .env ]; then
-        print_warning ".env file not found. Creating from .env.example..."
+        print_status "Creating .env file from template..."
         cp .env.example .env
-        print_warning "Please update .env file with your configuration values."
-        return 1
-    else
-        print_success ".env file found."
-        return 0
+        print_warning "Please update the .env file with your API keys and configuration."
     fi
 }
 
-# Create necessary directories
-create_directories() {
-    print_status "Creating necessary directories..."
+# Function to setup the application
+setup() {
+    print_status "Setting up AI SaaS Platform..."
     
-    mkdir -p logs
-    mkdir -p temp
-    mkdir -p uploads
+    # Check prerequisites
+    check_docker
+    check_docker_compose
     
-    print_success "Directories created."
-}
-
-# Generate package-lock.json files if they don't exist
-generate_lock_files() {
-    print_status "Generating package-lock.json files..."
+    # Create .env file if needed
+    create_env_file
     
-    # Generate lock file for root directory
-    if [ ! -f package-lock.json ]; then
-        print_status "Generating package-lock.json for root directory..."
-        npm install --package-lock-only --legacy-peer-deps
-    fi
-    
-    # Generate lock file for client directory
-    if [ ! -f client/package-lock.json ]; then
-        print_status "Generating package-lock.json for client..."
-        cd client
-        npm install --package-lock-only --legacy-peer-deps
-        cd ..
-    fi
-    
-    print_success "Package-lock.json files generated."
-}
-
-# Create health check script if it doesn't exist
-create_health_check() {
-    if [ ! -f healthcheck.js ]; then
-        print_status "Creating health check script..."
-        cat > healthcheck.js << 'EOF'
-const http = require('http');
-
-const options = {
-  hostname: 'localhost',
-  port: process.env.PORT || 3080,
-  path: '/health',
-  method: 'GET',
-  timeout: 2000
-};
-
-const req = http.request(options, (res) => {
-  if (res.statusCode === 200) {
-    process.exit(0);
-  } else {
-    process.exit(1);
-  }
-});
-
-req.on('error', () => {
-  process.exit(1);
-});
-
-req.on('timeout', () => {
-  req.destroy();
-  process.exit(1);
-});
-
-req.end();
-EOF
-        print_success "Health check script created."
-    fi
-}
-
-# Build Docker images
-build_images() {
-    print_status "Building Docker images..."
-    
-    docker-compose -f docker-compose.simple.yml build
-    
-    print_success "Docker images built successfully."
-}
-
-# Start services
-start_services() {
-    print_status "Starting services..."
-    
-    # Start database services first
-    print_status "Starting database services..."
-    docker-compose -f docker-compose.simple.yml up -d mongodb redis
-    
-    # Wait for databases to be ready
-    print_status "Waiting for databases to be ready..."
-    sleep 15
-    
-    # Start application services
-    print_status "Starting application services..."
-    docker-compose -f docker-compose.simple.yml up -d
+    # Build and start services
+    print_status "Building and starting services..."
+    docker-compose up --build -d
     
     # Wait for services to be ready
     print_status "Waiting for services to be ready..."
-    sleep 45
+    sleep 30
     
-    print_success "All services started successfully."
-}
-
-# Check service health
-check_health() {
+    # Check service health
     print_status "Checking service health..."
     
-    services=("mongodb" "redis" "api-gateway" "client")
-    
-    all_healthy=true
-    
-    for service in "${services[@]}"; do
-        if docker-compose -f docker-compose.simple.yml ps | grep -q "${service}.*Up"; then
-            print_success "$service is running."
-        else
-            print_error "$service is not running."
-            all_healthy=false
-        fi
-    done
-    
-    if [ "$all_healthy" = true ]; then
-        print_success "All services are healthy."
+    # Check API Gateway
+    if curl -s http://localhost:3080/health > /dev/null; then
+        print_success "API Gateway is healthy"
     else
-        print_warning "Some services are not healthy. Check logs for details."
+        print_warning "API Gateway may not be ready yet"
+    fi
+    
+    # Check Client Application
+    if curl -s http://localhost:3012 > /dev/null; then
+        print_success "Client Application is healthy"
+    else
+        print_warning "Client Application may not be ready yet"
+    fi
+    
+    print_success "AI SaaS Platform is now running!"
+    print_status "Access the application at: http://localhost:3012"
+    print_status "API Gateway is available at: http://localhost:3080"
+}
+
+# Function to start the application
+start() {
+    print_status "Starting AI SaaS Platform..."
+    docker-compose up -d
+    
+    print_success "AI SaaS Platform is now running!"
+    print_status "Access the application at: http://localhost:3012"
+    print_status "API Gateway is available at: http://localhost:3080"
+}
+
+# Function to stop the application
+stop() {
+    print_status "Stopping AI SaaS Platform..."
+    docker-compose down
+    
+    print_success "AI SaaS Platform has been stopped."
+}
+
+# Function to restart the application
+restart() {
+    print_status "Restarting AI SaaS Platform..."
+    docker-compose restart
+    
+    print_success "AI SaaS Platform has been restarted."
+    print_status "Access the application at: http://localhost:3012"
+    print_status "API Gateway is available at: http://localhost:3080"
+}
+
+# Function to view logs
+logs() {
+    if [ -z "$1" ]; then
+        docker-compose logs -f
+    else
+        docker-compose logs -f "$1"
     fi
 }
 
-# Show logs
-show_logs() {
-    print_status "Showing logs..."
-    docker-compose -f docker-compose.simple.yml logs -f --tail=100
+# Function to clean up
+clean() {
+    print_status "Cleaning up AI SaaS Platform..."
+    docker-compose down -v --remove-orphans
+    
+    print_success "AI SaaS Platform has been cleaned up."
 }
 
-# Stop services
-stop_services() {
-    print_status "Stopping services..."
-    docker-compose -f docker-compose.simple.yml down
-    print_success "All services stopped."
-}
-
-# Clean up
-cleanup() {
-    print_status "Cleaning up..."
-    docker-compose -f docker-compose.simple.yml down -v --remove-orphans
-    docker system prune -f
-    print_success "Cleanup completed."
-}
-
-# Show service URLs
-show_urls() {
-    print_status "Service URLs:"
-    echo "API Gateway: http://localhost:3080"
-    echo "Client Application: http://localhost:3012"
+# Function to show help
+show_help() {
+    echo "AI SaaS Platform Docker Run Script"
     echo ""
-    echo "Health Checks:"
-    echo "API Gateway: http://localhost:3080/health"
-    echo "Client Application: http://localhost:3012/health"
+    echo "Usage: $0 [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  setup    Setup and start the application (first time only)"
+    echo "  start    Start the application"
+    echo "  stop     Stop the application"
+    echo "  restart  Restart the application"
+    echo "  logs     Show logs for all services (or specify a service)"
+    echo "  clean    Remove all containers, networks, and volumes"
+    echo "  help     Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 setup           # Setup and start the application"
+    echo "  $0 start           # Start the application"
+    echo "  $0 logs api-gateway # Show logs for the API Gateway service"
+    echo "  $0 clean           # Remove all containers, networks, and volumes"
 }
 
 # Main script logic
 case "$1" in
-    "setup")
-        print_status "Setting up Docker environment..."
-        check_docker
-        create_directories
-        check_env_file
-        generate_lock_files
-        create_health_check
-        build_images
-        start_services
-        sleep 10
-        check_health
-        show_urls
-        print_success "Setup complete! The application is now running."
+    setup)
+        setup
         ;;
-    "start")
-        print_status "Starting services..."
-        check_docker
-        generate_lock_files
-        create_health_check
-        build_images
-        start_services
-        sleep 10
-        check_health
-        show_urls
+    start)
+        start
         ;;
-    "stop")
-        stop_services
+    stop)
+        stop
         ;;
-    "restart")
-        stop_services
-        start_services
-        sleep 10
-        check_health
+    restart)
+        restart
         ;;
-    "logs")
-        show_logs
+    logs)
+        logs "$2"
         ;;
-    "build")
-        generate_lock_files
-        build_images
+    clean)
+        clean
         ;;
-    "health")
-        check_health
-        ;;
-    "cleanup")
-        cleanup
-        ;;
-    "urls")
-        show_urls
-        ;;
-    "test")
-        print_status "Testing the application..."
-        
-        # Test API Gateway
-        print_status "Testing API Gateway..."
-        if curl -f -s http://localhost:3080/health > /dev/null; then
-            print_success "API Gateway is responding."
-        else
-            print_error "API Gateway is not responding."
-        fi
-        
-        # Test Client Application
-        print_status "Testing Client Application..."
-        if curl -f -s http://localhost:3012/health > /dev/null; then
-            print_success "Client Application is responding."
-        else
-            print_error "Client Application is not responding."
-        fi
-        
-        print_status "Test complete."
+    help|--help|-h)
+        show_help
         ;;
     *)
-        echo "AI SaaS Platform Docker Run Script"
-        echo ""
-        echo "Usage: $0 {setup|start|stop|restart|logs|build|health|cleanup|urls|test}"
-        echo ""
-        echo "Commands:"
-        echo "  setup    - Set up the environment and start services"
-        echo "  start    - Start all services"
-        echo "  stop     - Stop all services"
-        echo "  restart  - Restart all services"
-        echo "  logs     - Show logs for all services"
-        echo "  build    - Build Docker images"
-        echo "  health   - Check service health"
-        echo "  cleanup  - Clean up containers and volumes"
-        echo "  urls     - Show service URLs"
-        echo "  test     - Test if services are responding"
-        echo ""
-        echo "Examples:"
-        echo "  $0 setup     # First time setup"
-        echo "  $0 start     # Start services"
-        echo "  $0 test      # Test services"
-        echo "  $0 stop      # Stop services"
+        print_error "Unknown command: $1"
+        show_help
         exit 1
         ;;
 esac
-
-exit 0
